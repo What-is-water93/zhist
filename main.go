@@ -344,7 +344,7 @@ _fhistory_select() {
 	# Clear the user's fzf defaults so zhist renders the same on every machine.
 	id=$(zhist list |
 		FZF_DEFAULT_OPTS= FZF_DEFAULT_OPTS_FILE= \
-		fzf --ansi --reverse --prompt="Global> " --tiebreak=index \
+		fzf --ansi --reverse --prompt="Global> " --query="$1" --tiebreak=index \
 			--tabstop=1 --delimiter='\t' --with-nth=2.. \
 			--preview="zhist get -id {1}" --preview-window=$pwin \
 			--header="ctrl-g: dir/global · ctrl-d: delete entry · ctrl-x: delete all · ctrl-/: preview" \
@@ -364,7 +364,7 @@ _fhistory_widget() {
 		zle down-line-or-history
 	else
 		local selected
-		selected=$(_fhistory_select)
+		selected=$(_fhistory_select "$LBUFFER")
 		if [[ -n "$selected" ]]; then
 			BUFFER="$selected"
 			CURSOR=${#BUFFER}
