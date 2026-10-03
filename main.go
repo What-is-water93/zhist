@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 func dataPath() string {
@@ -40,6 +41,41 @@ func relTime(t int64, now int64) string {
 	default:
 		return fmt.Sprintf("%2dw ago", ago/604800)
 	}
+}
+
+// defaultMaxPath is the default -max-path value for `list` and `init`.
+const defaultMaxPath = 40
+
+// abbrevHome replaces a leading home directory with "~".
+func abbrevHome(dir string) string {
+	if dir == "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return dir
+	}
+	if dir == home {
+		return "~"
+	}
+	if rest, ok := strings.CutPrefix(dir, home+string(filepath.Separator)); ok {
+		return "~" + string(filepath.Separator) + rest
+	}
+	return dir
+}
+
+// truncatePath shortens path to at most max runes, keeping the tail (the
+// most specific part of the path) since that's what distinguishes sibling
+// directories. max <= 0 means no limit.
+func truncatePath(path string, max int) string {
+	r := []rune(path)
+	if max <= 0 || len(r) <= max {
+		return path
+	}
+	if max <= 1 {
+		return string(r[len(r)-max:])
+	}
+	return "…" + string(r[len(r)-(max-1):])
 }
 
 // fmtDur renders a duration in milliseconds; "" when unknown.
@@ -89,26 +125,56 @@ const (
 	cReset = "\033[0m"
 )
 
+// listPrefixCols is the display width of the duration and time columns plus
+// their tab separators (tabstop=1); listMargin covers fzf's pointer, marker
+// and scrollbar.
+const (
+	listPrefixCols = 7 + 1 + 8 + 1
+	listMargin     = 4
+)
+
+// listWidth returns the picker width from FZF_COLUMNS (set by fzf for reload
+// commands) or COLUMNS, or 0 if unknown.
+func listWidth() int {
+	for _, k := range []string{"FZF_COLUMNS", "COLUMNS"} {
+		if n, err := strconv.Atoi(os.Getenv(k)); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
 func cmdList(args []string) {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	dir := fs.String("dir", "", "only entries recorded in this directory")
+	maxPath := fs.Int("max-path", defaultMaxPath, "truncate the directory column to this many characters (0 = no limit)")
 	fs.Parse(args)
+	width := listWidth()
 	rows, err := newStore(dataPath()).List()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "zhist:", err)
 		os.Exit(1)
 	}
+	w := bufio.NewWriter(os.Stdout)
+	defer w.Flush()
+	writeList(w, rows, *dir, *maxPath, width, time.Now().Unix())
+}
+
+// fzfFieldFlags tells fzf how to split and search the rows writeList emits:
+// field 1 is the entry ID (hidden by --with-nth); in the displayed fields the
+// duration is 1, time 2, command 3 and path 4, so only the command is matched.
+const fzfFieldFlags = `--tabstop=1 --delimiter='\t' --with-nth=2.. --nth=3`
+
+// writeList renders rows newest first as tab-separated picker lines.
+func writeList(w io.Writer, rows []Row, dir string, maxPath, width int, now int64) {
 	// SHARE_HISTORY-imported files interleave sessions, so file order is not
 	// time order.
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].T < rows[j].T })
-	now := time.Now().Unix()
-	w := bufio.NewWriter(os.Stdout)
-	defer w.Flush()
 	// Newest first. Repeated runs each get a row; the picker stays faithful
 	// to what the user did.
 	for _, row := range slices.Backward(rows) {
 		e := row.Entry
-		if *dir != "" && e.D != *dir {
+		if dir != "" && e.D != dir {
 			continue
 		}
 		disp := e.C
@@ -119,11 +185,21 @@ func cmdList(args []string) {
 		if e.X > 0 {
 			col = cRed
 		}
-		fmt.Fprintf(w, "%s\t%s%7s%s\t%s%8s%s\t%s%s%s\n",
+		path := truncatePath(abbrevHome(e.D), maxPath)
+		// Right-align the path: pad after the command so it ends at the
+		// picker's right edge. The path is its own tab field so --nth=3 matches
+		// only the command. Without a known width it just follows the command.
+		pad := 1
+		if width > 0 {
+			used := listPrefixCols + utf8.RuneCountInString(disp) + utf8.RuneCountInString(path)
+			pad = max(1, width-listMargin-used-1) // -1 for the tab
+		}
+		fmt.Fprintf(w, "%s\t%s%7s%s\t%s%8s%s\t%s%s%s\t%s%s%s%s\n",
 			row.ID,
 			cDim, fmtDur(e.M), cReset,
 			cBlue, relTime(e.T, now), cReset,
-			col, disp, cReset)
+			col, disp, cReset,
+			strings.Repeat(" ", pad), cDim, path, cReset)
 	}
 }
 
@@ -338,14 +414,14 @@ _fhistory_select() {
 	local pstate="${XDG_STATE_HOME:-$HOME/.local/state}/zhist/preview-hidden"
 	mkdir -p "${pstate:h}"
 	local qstate=${(q)pstate}
-	local pwin="down,6,wrap"
-	[[ -f "$pstate" ]] && pwin="down,6,wrap,hidden"
+	local pwin="@PREVIEW_DIR@,6,wrap"
+	[[ -f "$pstate" ]] && pwin="@PREVIEW_DIR@,6,wrap,hidden"
 	local id
 	# Clear the user's fzf defaults so zhist renders the same on every machine.
-	id=$(zhist list |
+	id=$(FZF_COLUMNS=$COLUMNS zhist list |
 		FZF_DEFAULT_OPTS= FZF_DEFAULT_OPTS_FILE= \
-		fzf --ansi --reverse --prompt="Global> " --query="$1" --tiebreak=index \
-			--tabstop=1 --delimiter='\t' --with-nth=2.. \
+		fzf --ansi --@LAYOUT@ --prompt="Global> " --query="$1" --tiebreak=index \
+			` + fzfFieldFlags + ` \
 			--preview="zhist get -id {1}" --preview-window=$pwin \
 			--header="ctrl-g: dir/global · ctrl-d: delete entry · ctrl-x: delete all · ctrl-/: preview" \
 			--bind "tab:accept" \
@@ -389,8 +465,22 @@ bindkey '^[OB' _fhistory_widget
 func cmdInit(args []string) {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	noArrowBinds := fs.Bool("no-arrow-binds", false, "do not bind the up/down arrow keys")
+	maxPath := fs.Int("max-path", defaultMaxPath, "truncate the directory column in the picker to this many characters (0 = no limit)")
+	previewDir := fs.String("preview-direction", "up", "preview window position in the picker: up or down")
 	fs.Parse(args)
-	fmt.Print(zshInit)
+	if *previewDir != "up" && *previewDir != "down" {
+		fmt.Fprintf(os.Stderr, "zhist: invalid -preview-direction %q (want up or down)\n", *previewDir)
+		os.Exit(2)
+	}
+	out := strings.ReplaceAll(zshInit, "zhist list", "zhist list -max-path "+strconv.Itoa(*maxPath))
+	out = strings.ReplaceAll(out, "@PREVIEW_DIR@", *previewDir)
+	// Match the list layout to the preview: up pairs with the default
+	// bottom-prompt layout, down with the top-prompt (reverse) layout.
+	layout := "no-reverse"
+	if *previewDir == "down" {
+		layout = "reverse"
+	}
+	fmt.Print(strings.ReplaceAll(out, "@LAYOUT@", layout))
 	if !*noArrowBinds {
 		fmt.Print(zshArrowBinds)
 	}

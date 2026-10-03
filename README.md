@@ -10,9 +10,10 @@ https://github.com/user-attachments/assets/343446a8-d235-4cb4-9e24-10e95edde55a
 
 Native zsh history stores a command and a timestamp, nothing else. zhist stores
 context: where you ran a command, whether it failed, and how long it took. The
-fzf picker uses that context. Failed commands show in red, and each entry shows
-its duration. One key toggles between global history and the current
-directory's history.
+fzf picker uses that context. Failed commands show in red, each entry shows its
+duration, and the directory it ran in (home abbreviated to `~`, long paths
+truncated from the front so the most specific part stays visible). One key
+toggles between global history and the current directory's history.
 
 ## Install
 
@@ -78,6 +79,14 @@ blank directory and never render red.
 
 Pass `-no-arrow-binds` to `zhist init` to keep the default up/down behavior.
 Only `ctrl-r` opens the picker then.
+
+Pass `-max-path N` to `zhist init` to change how many characters of the
+directory column are shown before truncating (default 40, 0 for no limit).
+For example:
+
+```zsh
+eval "$(zhist init -max-path 60)"
+```
 
 ## Ignoring commands
 
@@ -146,9 +155,9 @@ Compatibility notes:
 ## CLI
 
 ```
-zhist init [-no-arrow-binds]  Print the zsh integration script
+zhist init [-no-arrow-binds] [-max-path N]  Print the zsh integration script
 zhist add -dir D -exit N [-ms N]  Append an entry; command read from stdin
-zhist list [-dir D]        Print entries for fzf, newest first
+zhist list [-dir D] [-max-path N]  Print entries for fzf, newest first
 zhist search [-dir D] [-limit N] PREFIX  Print commands starting with PREFIX, newest first
 zhist get -id ID           Print the full command for an entry
 zhist delete -id ID [-all] Delete an entry, or all entries with its command

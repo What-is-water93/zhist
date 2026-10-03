@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"os"
+	"os/exec"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -64,6 +68,47 @@ func TestSearchRowsUnsortedInput(t *testing.T) {
 	}
 }
 
+func TestAbbrevHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no home directory available")
+	}
+	cases := []struct {
+		dir  string
+		want string
+	}{
+		{home, "~"},
+		{home + "/code/zhist", "~/code/zhist"},
+		{"/var/empty", "/var/empty"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := abbrevHome(c.dir); got != c.want {
+			t.Errorf("abbrevHome(%q) = %q, want %q", c.dir, got, c.want)
+		}
+	}
+}
+
+func TestTruncatePath(t *testing.T) {
+	cases := []struct {
+		path string
+		max  int
+		want string
+	}{
+		{"~/code/zhist", 0, "~/code/zhist"},
+		{"~/code/zhist", 100, "~/code/zhist"},
+		{"~/code/zhist", 12, "~/code/zhist"},
+		{"~/code/zhist", 8, "…e/zhist"},
+		{"~/code/zhist", 1, "t"},
+		{"héllo/wörld", 7, "…/wörld"},
+	}
+	for _, c := range cases {
+		if got := truncatePath(c.path, c.max); got != c.want {
+			t.Errorf("truncatePath(%q, %d) = %q, want %q", c.path, c.max, got, c.want)
+		}
+	}
+}
+
 func TestFmtDur(t *testing.T) {
 	cases := []struct {
 		ms   int64
@@ -87,5 +132,32 @@ func TestFmtDur(t *testing.T) {
 		if got := fmtDur(c.ms); got != c.want {
 			t.Errorf("fmtDur(%d) = %q, want %q", c.ms, got, c.want)
 		}
+	}
+}
+
+func TestPickerIgnoresPathWhenMatching(t *testing.T) {
+	fzf, err := exec.LookPath("fzf")
+	if err != nil {
+		t.Skip("fzf not installed")
+	}
+	rows := []Row{
+		{ID: "a", Entry: Entry{T: 1, D: "/home/test", C: "ls"}},
+		{ID: "b", Entry: Entry{T: 2, D: "/home/other", C: "test -f x"}},
+	}
+	var list bytes.Buffer
+	writeList(&list, rows, "", 0, 80, 100)
+
+	args := []string{"--ansi", "--filter=test"}
+	args = append(args, strings.Fields(strings.ReplaceAll(fzfFieldFlags, "'", ""))...)
+	cmd := exec.Command(fzf, args...)
+	cmd.Env = append(os.Environ(), "FZF_DEFAULT_OPTS=", "FZF_DEFAULT_OPTS_FILE=")
+	cmd.Stdin = &list
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("fzf: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], "b\t") {
+		t.Errorf("query %q matched %q, want only the command containing it (ID b)", "test", lines)
 	}
 }
