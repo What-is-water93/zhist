@@ -17,12 +17,6 @@ toggles between global history and the current directory's history.
 
 ## Install
 
-Homebrew (recommended):
-
-```sh
-brew install overflowy/tap/zhist
-```
-
 Go:
 
 ```sh
@@ -37,7 +31,6 @@ zinit light overflowy/zhist
 ```
 
 Requires [fzf](https://github.com/junegunn/fzf) 0.45 or newer for the picker.
-Homebrew installs it as a dependency.
 
 ## Setup
 
@@ -54,8 +47,8 @@ line. Example with zsh-snap:
 znap source overflowy/zhist
 ```
 
-The plugin file only loads the integration. Install the binary with Homebrew,
-Go, or zinit first.
+The plugin file only loads the integration. Install the binary with Go or
+zinit first.
 
 Import existing history once:
 

@@ -17,28 +17,3 @@ checksum:
 # fail with "already_exists".
 release:
   mode: replace
-
-homebrew_casks:
-  - repository:
-      owner: overflowy
-      name: homebrew-tap
-      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
-    homepage: https://github.com/overflowy/zhist
-    description: Shell history for zsh with directory, exit status, and duration
-    dependencies:
-      - formula: fzf
-    caveats: |
-      Add to .zshrc:
-        eval "$(zhist init)"
-    # The binaries are not signed or notarized; clear the quarantine flag so
-    # macOS runs them.
-    #
-    # This goes in custom_block rather than hooks.post.install because
-    # GoReleaser renders hooks with the legacy `postflight` stanza, which
-    # Homebrew deprecated in favour of the declarative `postflight_steps`.
-    custom_block: |
-      postflight_steps do
-        on_macos do
-          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/zhist"]
-        end
-      end
